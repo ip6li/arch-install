@@ -1,0 +1,4 @@
+---
+luks_keyfile: home_keyfile
+user_name: aur
+user_password: '$6$Lq3O1jvGt2oa9./1$8zILdSv35vZJPiwiXVc.don4IBcwSYrZuCr5Q3mDcnk5YhSPq5Z3dIWTjIaPhF90dUfnM7kyFcCpeOeXEkdl11'

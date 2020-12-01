@@ -1,0 +1,12 @@
+---
+ansible_host: 192.168.1.21
+boot_partition_suffix: 1
+install_drive: /dev/sda
+luks_keyfile: keyfile
+root_partition_suffix: 2
+wired_interface: enp4s0
+user_name: aur
+
+netmask: 255.255.255.0
+gateway: 192.168.1.254
+
