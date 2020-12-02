@@ -415,15 +415,19 @@
             dest: /mnt/etc/default/grub
             regexp: ^GRUB_CMDLINE_LINUX=
             line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:luks-lvm ip={{ ansible_host }}::{{ gateway }}:{{ netmask }}:initramfs:eth0:none"
-        - name: Install grub
+
+        - name: Install grub {{ install_drive }}
           command: arch-chroot /mnt grub-install '{{ install_drive }}'
-          when: install_drive is defined
+          when: install_drive is defined and not efi | bool
         - name: Install grub {{ raid_a }}
           command: arch-chroot /mnt grub-install '{{ raid_a }}'
-          when: raid_a is defined
+          when: raid_a is defined and not efi | bool
         - name: Install grub {{ raid_b }}
           command: arch-chroot /mnt grub-install '{{ raid_b }}'
-          when: raid_b is defined
+          when: raid_b is defined and not efi | bool
+        - name: Install grub (UEFI)
+          command: arch-chroot /mnt grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+          when: efi | bool
         - name: Create grub config
           command: arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
       tags:

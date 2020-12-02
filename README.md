@@ -24,6 +24,10 @@ After booting from the Arch installation media, you will need to:
 At this point we are able to login remotely as root, so we can
 populate `inventory.yml` and run `site.yml`:
 
+```console
+ansible-playbook -i inventory.yml site.yml
+```
+
 # inventory.yml
 
 Set either
@@ -42,20 +46,6 @@ raid_b: /dev/sdb
 if you are using a Linux software Raid.
 
 NEVER BOTH!
-
-## BIOS boot
-
-```console
-ansible-playbook -i inventory.yml site.dos.yml
-```
-
-## UEFI boot
-
-NOT TESTED!!!
-
-```console
-ansible-playbook -i inventory.yml site.uefi.yml
-```
 
 # Status
 

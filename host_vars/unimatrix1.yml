@@ -13,4 +13,5 @@ pod_network: 10.67.0.0/16
 
 raid_a: /dev/sda
 raid_b: /dev/sdb
+efi: False
 
