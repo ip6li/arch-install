@@ -1,0 +1,73 @@
+---
+- hosts: all
+  tasks:
+    - name: Abort if the host is not booted from the Arch install media
+      fail:
+        msg: "This host is not booted from the Arch install media!"
+      when: ansible_nodename != 'archiso'
+      tags:
+        - quick_exit
+
+
+
+    - name: Get UUIDs
+      block:
+        - name: Get UUID for boot filesystem
+          command: blkid -s UUID -o value '{{ install_drive }}{{ boot_partition_suffix }}'
+          register: boot_uuid
+          changed_when: false
+          when: install_drive is defined
+        - name: Get UUID for boot filesystem (Raid)
+          command: blkid -s UUID -o value '/dev/md/boot'
+          register: boot_uuid
+          changed_when: false
+          when: raid_a is defined and raid_b is defined
+        - name: Get UUID for root filesystem
+          command: blkid -s UUID -o value /dev/vg0/root
+          register: root_uuid
+          changed_when: false
+        - name: Get UUID for usr filesystem
+          command: blkid -s UUID -o value /dev/vg0/usr
+          register: usr_uuid
+          changed_when: false
+
+        - name: Get UUID for root LUKS volume
+          command: blkid -s UUID -o value '{{ install_drive }}{{ root_partition_suffix }}'
+          register: root_luks_uuid
+          changed_when: false
+          when: install_drive is defined
+        - name: Get UUID for root LUKS volume (Raid)
+          command: blkid -s UUID -o value '/dev/md/lvm'
+          register: root_luks_uuid
+          changed_when: false
+          when: raid_a is defined and raid_b is defined
+
+
+
+    - name: Set up grub
+      block:
+        - name: Add commandline information to grub config
+          lineinfile:
+            dest: /mnt/etc/default/grub
+            regexp: ^GRUB_CMDLINE_LINUX=
+            line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:luks-lvm ip={{ ansible_host }}::{{ gateway }}:{{ netmask }}:initramfs:eth0:none"
+        - name: Install grub
+          command: arch-chroot /mnt grub-install '{{ install_drive }}'
+          when: install_drive is defined
+        - name: Install grub {{ raid_a }}
+          command: arch-chroot /mnt grub-install '{{ raid_a }}'
+          when: raid_a is defined
+        - name: Install grub {{ raid_b }}
+          command: arch-chroot /mnt grub-install '{{ raid_b }}'
+          when: raid_b is defined
+        - name: Create grub config
+          command: arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+      tags:
+        - grub
+
+
+
+
+
+
+

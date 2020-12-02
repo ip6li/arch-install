@@ -24,6 +24,25 @@ After booting from the Arch installation media, you will need to:
 At this point we are able to login remotely as root, so we can
 populate `inventory.yml` and run `site.yml`:
 
+# inventory.yml
+
+Set either
+```console
+install_drive
+```
+if you are using a single drive for installation
+
+or
+
+```console
+raid_a: /dev/sda
+raid_b: /dev/sdb
+```
+
+if you are using a Linux software Raid.
+
+NEVER BOTH!
+
 ## BIOS boot
 
 ```console

@@ -13,12 +13,39 @@
       tags:
         - sync_clock
 
+    - name: Check Raid definitions
+      block:
+        - name: Fail if raid_a is defined only
+          fail:
+            msg: "raid_a defined, but raid_b not"
+          when: raid_a is defined and raid_b is undefined
+        - name: Fail if raid_b is defined only
+          fail:
+            msg: "raid_b defined, but raid_a not"
+          when: raid_a is undefined and raid_b is defined
+
+    - name: Stop old md devices (may fail, if not md devices found)
+      shell: for i in /dev/md?*; do mdadm --stop $i; done; exit 0
+      when: raid_a is defined and raid_b is defined
+
+    - name: Wipe install drive and all its partitions
+      block:
+        - name: Clean {{ install_drive }}
+          command: find /dev -wholename "{{ install_drive }}*" -exec wipefs --force --all {} \;
+          when: raid_a is undefined and raid_b is undefined
+
+        - name: Wipe raid_a drive and all its partitions
+          command: find /dev -wholename "{{ raid_a }}*" -exec wipefs --force --all {} \;
+          when: raid_a is defined
+
+        - name: Wipe raid_b drive and all its partitions
+          command: find /dev -wholename "{{ raid_b }}*" -exec wipefs --force --all {} \;
+          when: raid_b is defined
+      tags:
+        - wipefs
+
     - name: Repartition install drive
       block:
-        - name: Wipe install drive and all its partitions
-          command: find /dev -wholename "{{ install_drive }}*" -exec wipefs --force --all {} \;
-          tags:
-            - wipefs
         - name: Create boot partition
           parted:
             device: '{{ install_drive }}'
@@ -37,6 +64,42 @@
             state: present
       tags:
         - repartition
+      when: install_drive is defined
+
+    - name: Repartition Raid drives
+      block:
+        - name: Create boot partition
+          parted:
+            device: '{{ item.raid_device }}'
+            label: msdos
+            number: 1
+            part_end: 1024MB
+            flags: [raid]
+            state: present
+          loop:
+            - {raid_device: "{{ raid_a }}" }
+            - {raid_device: "{{ raid_b }}" }
+        - name: Create lvm partition
+          parted:
+            device: '{{ item.raid_device }}'
+            label: msdos
+            number: 2
+            part_start: 1024MB
+            flags: [raid]
+            state: present
+          loop:
+            - {raid_device: "{{ raid_a }}" }
+            - {raid_device: "{{ raid_b }}" }
+      tags:
+        - repartition
+      when: raid_a is defined and raid_b is defined
+
+    - name: Create Raid1
+      command: mdadm --create --run --raid-devices=2 --level=1 /dev/md/{{ item.label }} {{ raid_a }}{{ item.md }} {{ raid_b }}{{ item.md }}
+      loop:
+        - {md: 1, label: boot}
+        - {md: 2, label: crypt}
+      when: raid_a is defined and raid_b is defined
 
     - name: Setup LUKS encryption for root filesystem
       block:
@@ -48,20 +111,40 @@
           luks_device:
             device: '{{ install_drive }}{{ root_partition_suffix }}'
             state: absent
+          when: install_drive is defined
+        - name: Destroy existing LUKS volume (Raid)
+          luks_device:
+            device: '/dev/md/crypt'
+            state: absent
+          when: raid_a is defined and raid_b is defined
         - name: Create and open LUKS volume
           luks_device:
             device: '{{ install_drive }}{{ root_partition_suffix }}'
             keyfile: /root/keyfile
-            name: luks-sda2
+            name: luks-lvm
             state: opened
+          when: install_drive is defined
+        - name: Create and open LUKS volume (Raid)
+          luks_device:
+            device: '/dev/md/crypt'
+            keyfile: /root/keyfile
+            name: luks-lvm
+            state: opened
+          when: raid_a is defined and raid_b is defined
         - name: Get UUID for root LUKS volume
           command: blkid -s UUID -o value '{{ install_drive }}{{ root_partition_suffix }}'
           register: root_luks_uuid
           changed_when: false
+          when: install_drive is defined
+        - name: Get UUID for root LUKS volume (Raid)
+          command: blkid -s UUID -o value '/dev/md/crypt'
+          register: root_luks_uuid
+          changed_when: false
+          when: raid_a is defined and raid_b is defined
       tags:
         - luks
 
-    - name: Setup LVM root and tmp volumes
+    - name: Setup LVM root and usr volumes
       block:
         - name: Remove existing volume group
           lvg:
@@ -72,7 +155,7 @@
           lvg:
             vg: vg0
             pvs:
-              - /dev/mapper/luks-sda2
+              - /dev/mapper/luks-lvm
         - name: Configure logical volumes
           lvol:
             vg: vg0
@@ -84,14 +167,6 @@
       tags:
         - lvm
 
-    - name: Setup LVM Config
-      lineinfile:
-        dest: /mnt/etc/lvm/lvm.conf
-        regexp: '{{ item.regex }}'
-        line: '{{ item.line }}'
-      loop:
-        - {regex: issue_discards = 0, line: issue_discards = 1}
-      
     - name: Create filesystems
       block:
         - name: Create ext4 filesystem in boot partition
@@ -99,20 +174,33 @@
             dev: '{{ install_drive }}{{ boot_partition_suffix }}'
             fstype: ext4
             force: yes
+          when: install_drive is defined
+        - name: Create ext4 filesystem in boot partition (Raid)
+          filesystem:
+            dev: '/dev/md/boot'
+            fstype: ext4
+            force: yes
+          when: raid_a is defined and raid_b is defined
         - name: Create ext4 filesystem in root volume
           filesystem:
             dev: /dev/vg0/root
             fstype: ext4
-            force: yes
+            force: yes 
         - name: Create ext4 filesystem in usr volume
           filesystem:
             dev: /dev/vg0/usr
             fstype: ext4
-            force: yes
+            force: yes 
         - name: Get UUID for boot filesystem
           command: blkid -s UUID -o value '{{ install_drive }}{{ boot_partition_suffix }}'
           register: boot_uuid
           changed_when: false
+          when: install_drive is defined
+        - name: Get UUID for boot filesystem (Raid)
+          command: blkid -s UUID -o value '/dev/md/boot'
+          register: boot_uuid
+          changed_when: false
+          when: raid_a is defined and raid_b is defined
         - name: Get UUID for root filesystem
           command: blkid -s UUID -o value /dev/vg0/root
           register: root_uuid
@@ -123,7 +211,6 @@
           changed_when: false
       tags:
         - create_filesystems
-
 
     - name: Mount filesystems
       block:
@@ -206,6 +293,14 @@
       tags:
         - fstab
 
+    - name: Setup LVM Config
+      lineinfile:
+        dest: /mnt/etc/lvm/lvm.conf
+        regexp: '{{ item.regex }}'
+        line: '{{ item.line }}'
+      loop:
+        - {regex: issue_discards = 0, line: issue_discards = 1}
+
     - name: Set local timezone
       command: arch-chroot /mnt ln -sf /usr/share/zoneinfo/Europe/Berlin /etc/localtime
       tags:
@@ -266,30 +361,37 @@
 
     - name: Setup SSH
       block:
-      - name: Generate ED25519 key
-        shell: echo -e 'y\n' | ssh-keygen -q -N "" -t ed25519 -f /mnt/etc/ssh/ssh_host_ed25519_key
-      - name: Copy ED25519 key
-        shell: cat /mnt/etc/ssh/ssh_host_ed25519_key > /mnt/tmp/hostkey ; chmod og-rwx /mnt/tmp/hostkey
-      - name: Pem ED25519 key
-        shell: ssh-keygen -m PEM -q -N "" -p -f /mnt/tmp/hostkey
-      - name: Convert ED25519 key to Dropbear
-        shell: dropbearconvert openssh dropbear /mnt/tmp/hostkey /mnt/etc/dropbear/dropbear_ecdsa_host_key
       - name: Generate RSA key
         shell: echo -e 'y\n' | ssh-keygen -q -N "" -t rsa -b 4096 -f /mnt/etc/ssh/ssh_host_rsa_key
       - name: Copy RSA key
-        shell: cat /mnt/etc/ssh/ssh_host_rsa_key > /mnt/tmp/hostkey ; chmod og-rwx /mnt/tmp/hostkey
+        shell: cat /mnt/etc/ssh/ssh_host_rsa_key > /mnt/etc/ssh/hostkey ; chmod og-rwx /mnt/etc/ssh/hostkey
       - name: Pem RSA key
-        shell: ssh-keygen -m PEM -q -N "" -p -f /mnt/tmp/hostkey
+        shell: ssh-keygen -m PEM -q -N "" -p -f /mnt/etc/ssh/hostkey
       - name: Convert RSA Key to Dropbear
-        shell: dropbearconvert openssh dropbear /mnt/tmp/hostkey /mnt/etc/dropbear/dropbear_rsa_host_key
-      - name: Clean keys
-        file:
-          state: absent
-          path: /mnt/tmp/hostkey
-      - name: Copy over ssh key from current Ansible controller as an authorized key
-        copy:
-          src: '{{ lookup("env", "HOME") }}/.ssh/id_rsa.pub'
-          dest: /mnt/etc/dropbear/root_key
+        command: arch-chroot /mnt dropbearconvert openssh dropbear /etc/ssh/hostkey /etc/dropbear/dropbear_rsa_host_key
+
+      - name: Generate ED25519 key
+        shell: echo -e 'y\n' | ssh-keygen -q -N "" -t ed25519 -f /mnt/etc/ssh/ssh_host_ed25519_key
+      - name: Copy ED25519 key
+        shell: cat /mnt/etc/ssh/ssh_host_ed25519_key > /mnt/etc/ssh/hostkey ; chmod og-rwx /mnt/etc/ssh/hostkey
+      - name: Pem ED25519 key
+        shell: ssh-keygen -m PEM -q -N "" -p -f /mnt/etc/ssh/hostkey
+      - name: Convert ED25519 Key to Dropbear
+        command: arch-chroot /mnt dropbearconvert openssh dropbear /etc/ssh/hostkey /etc/dropbear/dropbear_ed25519_host_key
+      tags:
+        - sshd
+
+    - name: Clean keys
+      file:
+        state: absent
+        path: /mnt/etc/ssh/hostkey
+      tags:
+        - sshd
+
+    - name: Copy over ssh key from current Ansible controller as an authorized key
+      copy:
+        src: '{{ lookup("env", "HOME") }}/.ssh/id_rsa.pub'
+        dest: /mnt/etc/dropbear/root_key
       tags:
         - sshd
 
@@ -312,10 +414,16 @@
           lineinfile:
             dest: /mnt/etc/default/grub
             regexp: ^GRUB_CMDLINE_LINUX=
-            #line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:root root=/dev/mapper/root"
-            line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:luks-sda2 ip={{ ansible_host }}::{{ gateway }}:{{ netmask }}:initramfs:eth0:none"
+            line: GRUB_CMDLINE_LINUX="cryptdevice=UUID={{ root_luks_uuid.stdout }}:luks-lvm ip={{ ansible_host }}::{{ gateway }}:{{ netmask }}:initramfs:eth0:none"
         - name: Install grub
           command: arch-chroot /mnt grub-install '{{ install_drive }}'
+          when: install_drive is defined
+        - name: Install grub {{ raid_a }}
+          command: arch-chroot /mnt grub-install '{{ raid_a }}'
+          when: raid_a is defined
+        - name: Install grub {{ raid_b }}
+          command: arch-chroot /mnt grub-install '{{ raid_b }}'
+          when: raid_b is defined
         - name: Create grub config
           command: arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
       tags:
