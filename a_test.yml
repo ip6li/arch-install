@@ -1,0 +1,131 @@
+---
+- hosts: all
+  tasks:
+
+    - name: Install Arch Updates
+      command: pacman -Suy --noconfirm
+
+    - name: Setup Kubernetes brigde network
+      include: includes/kubernetes.network.inc.yml
+      when: kube_ctl | bool
+
+    - name: Install Kubernetes dependencies
+      command: pacman -S --noconfirm base-devel ebtables ethtool socat conntrack-tools containerd wget crictl devtools base-devel go go-md2man ostree conmon skopeo
+
+    - name: System setup
+      block:
+        - name: Enable forwarding
+          copy:
+            dest: "/etc/sysctl.d/kubernetes.conf"
+            content: |
+              net.ipv4.conf.all.forwarding=1
+        - name: Load forwarding
+          command: sysctl -p /etc/sysctl.d/kubernetes.conf
+        - name: Enable br_netfilter
+          copy:
+            dest: "/etc/modules-load.d/br_netfilter.conf"
+            content: |
+              br_netfilter
+        - name: Load br_netfilter
+          command: modprobe br_netfilter
+      tags:
+        - system_setup
+
+    - name: Enable containerd
+      block:
+        - name: enable containerd
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: containerd
+      tags:
+        - containerd
+
+    - name: Remove old Kubernetes
+      include: includes/remove-kubernetes.inc.yml
+
+    - name: Install Kubernetes (AUR)
+      block:
+        - name: Get Kubernetes (Controller node)
+          become: true
+          become_user: aur
+          shell: cd /home/aur && curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/{{ item.p }}.tar.gz && tar xvf {{ item.p }}.tar.gz && rm -f {{ item.p }}.tar.gz
+          loop:
+            - {p: kubectl-bin}
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+            - {p: cni-plugins}
+            - {p: cri-o-git}
+          when: kube_ctl | bool
+        - name: Get Kubernetes (Worker node)
+          become: true
+          become_user: aur
+          shell: cd /home/aur && curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/{{ item.p }}.tar.gz && tar xvf {{ item.p }}.tar.gz && rm -f {{ item.p }}.tar.gz
+          loop:
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+          when: not kube_ctl | bool
+        - name: Install Kubernetes (Controller node)
+          shell: cd /home/aur/{{ item.p }} && sudo -u aur makepkg -f && pacman --noconfirm -U *.tar.zst
+          loop:
+            - {p: kubectl-bin}
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+            - {p: cni-plugins}
+            - {p: cri-o-git}
+          when: kube_ctl | bool
+        - name: Install Kubernetes (Worker node)
+          shell: cd /home/aur/{{ item.p }} && sudo -u aur makepkg -f && pacman --noconfirm -U *.tar.zst
+          loop:
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+          when: not kube_ctl | bool
+
+    - name: Setup CRI-O
+      block:
+        - name: crio-shutdown.service
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: crio-shutdown.service
+        - name: crio-wipe.service
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: crio-wipe.service
+        - name: crio.service
+          systemd:
+            state: restarted
+            enabled: yes
+            daemon_reload: yes
+            name: crio.service
+
+    - name: Setup Kubernetes
+      block:
+        - name: Remove old Kubernetes config
+          shell: kubeadm reset --force --cri-socket /var/run/crio/crio.sock && rm -rf /opt/cni /etc/cni/net.d
+        - name: Kubernetes init (Controller)
+          shell: umask 077 && kubeadm init --pod-network-cidr={{ pod_network }} --control-plane-endpoint {{ kube_controller }}:6443 --cri-socket /var/run/crio/crio.sock --upload-certs 2>&1 | tee /var/log/kubeadm.init.log
+          when: kube_ctl | bool
+        - name: enable kubelet
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: kubelet
+
+    - name: Set environment
+      become: true
+      become_user: aur
+      shell: mkdir -p $HOME/.kube && sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && sudo chown $(id -u):$(id -g) $HOME/.kube/config
+      when: kube_ctl | bool
+
+    - name: Install Calico
+      become: true
+      become_user: aur
+      shell: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      when: kube_ctl | bool
+  

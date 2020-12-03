@@ -12,6 +12,7 @@
         - {p: kubelet-bin}
         - {p: kubeadm-bin}
         - {p: cni-plugins-bin}
+        - {p: cri-o-git}
         - {p: .kube}
     - name: disable old kubelet
       shell: systemctl disable kubelet; exit 0

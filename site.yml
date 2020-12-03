@@ -147,10 +147,7 @@
     - name: Setup LVM root and usr volumes
       block:
         - name: Remove existing volume group
-          lvg:
-            vg: vg0
-            force: yes
-            state: absent
+          command: pvremove -ff -y /dev/mapper/luks-lvm
         - name: Configure volume group
           lvg:
             vg: vg0
@@ -351,7 +348,7 @@
               DNS=192.168.1.254
             dest: /mnt/etc/systemd/network/50-{{ wired_interface }}.network
         - name: Enable network
-          command: arch_chroot /mnt systemctl enable systemd-networkd
+          command: arch-chroot /mnt systemctl enable systemd-networkd
       tags:
         - systemd_networkd
 
