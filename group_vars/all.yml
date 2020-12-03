@@ -2,7 +2,8 @@
 ansible_user: root
 ansible_ssh_common_args: -o "StrictHostKeyChecking no" -o "UserKnownHostsFile /dev/null"
 ansible_ssh_pass: blah
-#install_drive: /dev/sda
-wired_interface: enp4s0
+pod_network: 10.67.0.0/16
 boot_partition_suffix: '1'
 root_partition_suffix: '2'
+kube_controller: 192.168.1.21
+

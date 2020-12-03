@@ -1,0 +1,122 @@
+---
+- hosts: all
+  tasks:
+
+#    - name: Abort if the host is not a control plane
+#      fail:
+#        msg: "Works for now only for control plane"
+#      when: not kube_ctl | bool
+#      tags:
+#        - quick_exit
+
+    - name: Install Arch Updates
+      command: pacman -Suy --noconfirm
+
+    - name: Setup Kubernetes brigde network
+      include: includes/kubernetes.network.inc.yml
+      when: kube_ctl | bool
+
+    - name: Install Kubernetes dependencies
+      command: pacman -S --noconfirm base-devel ebtables ethtool socat conntrack-tools docker wget crictl devtools base-devel
+
+    - name: Enable Docker use for user aur
+      command: usermod -a -G docker aur
+
+    - name: System setup
+      block:
+        - name: Enable forwarding
+          copy:
+            dest: "/etc/sysctl.d/kubernetes.conf"
+            content: |
+              net.ipv4.conf.all.forwarding=1
+        - name: Load forwarding
+          command: sysctl -p /etc/sysctl.d/kubernetes.conf
+        - name: Enable br_netfilter
+          copy:
+            dest: "/etc/modules-load.d/br_netfilter.conf"
+            content: |
+              br_netfilter
+        - name: Load br_netfilter
+          command: modprobe br_netfilter
+        - name: Setup daemon.json
+          copy:
+            src: "daemon.json"
+            dest: "/etc/docker/daemon.json"
+      tags:
+        - system_setup
+
+    - name: Enable Docker
+      block:
+        - name: enable Docker
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: docker
+      tags:
+        - docker
+
+    - name: Remove old Kubernetes
+      include: includes/remove-kubernetes.inc.yml
+
+    - name: Install Kubernetes (AUR)
+      block:
+        - name: Get Kubernetes (Controller node)
+          become: true
+          become_user: aur
+          shell: cd /home/aur && curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/{{ item.p }}.tar.gz && tar xvf {{ item.p }}.tar.gz && rm -f {{ item.p }}.tar.gz
+          loop:
+            - {p: kubectl-bin}
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+            - {p: cni-plugins-bin}
+          when: kube_ctl | bool
+        - name: Get Kubernetes (Worker node)
+          become: true
+          become_user: aur
+          shell: cd /home/aur && curl -O https://aur.archlinux.org/cgit/aur.git/snapshot/{{ item.p }}.tar.gz && tar xvf {{ item.p }}.tar.gz && rm -f {{ item.p }}.tar.gz
+          loop:
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+          when: not kube_ctl | bool
+        - name: Install Kubernetes (Controller node)
+          shell: cd /home/aur/{{ item.p }} && sudo -u aur makepkg -f && pacman --noconfirm -U *.tar.zst
+          loop:
+            - {p: kubectl-bin}
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+            - {p: cni-plugins-bin}
+          when: kube_ctl | bool
+        - name: Install Kubernetes (Worker node)
+          shell: cd /home/aur/{{ item.p }} && sudo -u aur makepkg -f && pacman --noconfirm -U *.tar.zst
+          loop:
+            - {p: kubelet-bin}
+            - {p: kubeadm-bin}
+          when: not kube_ctl | bool
+
+    - name: Setup Kubernetes
+      block:
+        - name: Remove old Kubernetes config
+          shell: kubeadm reset --force && rm -rf /opt/cni
+        - name: Kubernetes init (Controller)
+          shell: umask 077 && kubeadm init --pod-network-cidr={{ pod_network }} --control-plane-endpoint {{ kube_controller }}:6443 --upload-certs | tee /var/log/kubeadm.init.log
+          when: kube_ctl | bool
+        - name: enable kubelet
+          systemd:
+            state: started
+            enabled: yes
+            daemon_reload: yes
+            name: kubelet
+
+    - name: Set environment
+      become: true
+      become_user: aur
+      shell: mkdir -p $HOME/.kube && sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && sudo chown $(id -u):$(id -g) $HOME/.kube/config
+      when: kube_ctl | bool
+
+    - name: Install Calico
+      become: true
+      become_user: aur
+      shell: kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+      when: kube_ctl | bool
+  

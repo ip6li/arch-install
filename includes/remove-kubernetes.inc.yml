@@ -1,0 +1,20 @@
+- name: Install Arch Updates
+  command: pacman -Suy --noconfirm
+
+- name: Remove old Kubernetes
+  block:
+    - name: Remove Kubernetes source
+      become: true
+      become_user: aur
+      shell: cd /home/aur && rm -rf {{ item.p }}
+      loop:
+        - {p: kubectl-bin}
+        - {p: kubelet-bin}
+        - {p: kubeadm-bin}
+        - {p: cni-plugins-bin}
+        - {p: .kube}
+    - name: disable old kubelet
+      shell: systemctl disable kubelet; exit 0
+    - name: Delete old Kubernetes (may fail if not already installed)
+      shell: pacman -R -ss --noconfirm kubeadm-bin kubectl-bin kubelet-bin cni-plugins-bin ; exit 0
+

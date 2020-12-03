@@ -1,5 +1,5 @@
 ---
-ansible_host: 192.168.1.21
+ansible_host: 192.168.1.17
 boot_partition_suffix: 1
 luks_keyfile: keyfile
 root_partition_suffix: 2
@@ -10,11 +10,10 @@ netmask: 255.255.255.0
 gateway: 192.168.1.254
 
 pod_interface: enp3s0
-pod_address: 10.67.0.3/16
+pod_address: 10.67.0.2/16
 
-raid_a: /dev/sda
-raid_b: /dev/sdb
+install_drive: /dev/sda
 efi: False
 
-kube_ctl: True
+kube_ctl: False
 

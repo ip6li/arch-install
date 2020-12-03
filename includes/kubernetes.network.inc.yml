@@ -1,0 +1,69 @@
+- name: Setup Kubernetes Pod network
+  block:
+
+    - name: Create systemd services for {{ pod_interface }}
+      copy:
+        content: |
+          [Match]
+          Name={{ pod_interface }}
+
+          [Network]
+          VLAN={{ pod_interface }}.3
+        dest: /etc/systemd/network/50-{{ pod_interface }}.network
+
+    - name: Create {{ pod_interface }} VLAN netdevs
+      copy:
+        content: |
+          [NetDev]
+          Name={{ pod_interface }}.{{ item.vlan }}
+          Kind=vlan
+
+          [VLAN]
+          Id={{ item.vlan }}
+        dest: /etc/systemd/network/50-{{ pod_interface }}.{{ item.vlan }}.netdev
+      loop:
+        - {vlan: 3}
+
+    - name: Create {{ pod_interface }} VLAN network
+      copy:
+        content: |
+          [Match]
+          Name={{ pod_interface }}.{{ item.vlan }}
+
+          [Network]
+          Bridge=br{{ item.vlan }}
+        dest: /etc/systemd/network/50-{{ pod_interface }}.{{ item.vlan }}.network
+      loop:
+        - {vlan: 3}
+
+    - name: Create bridge netdev
+      copy:
+        content: |
+          [NetDev]
+          Name=br{{ item.vlan }}
+          Kind=bridge
+        dest: /etc/systemd/network/50-br{{ item.vlan }}.netdev
+      loop:
+        - {vlan: 3}
+
+    - name: Create bridge br3
+      copy:
+        content: |
+          [Match]
+          Name=br3
+
+          [Network]
+          ConfigureWithoutCarrier=true
+          Address=10.67.0.3/16
+        dest: /etc/systemd/network/50-br3.network
+
+    - name: Restart network
+      systemd:
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+        name: systemd-networkd
+
+  tags:
+    - systemd_network_service
+

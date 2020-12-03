@@ -256,7 +256,7 @@
         - mirrors
 
     - name: Run pacstrap
-      command: pacstrap /mnt base dhclient dhcpcd grub linux linux-firmware lvm2 mdadm cryptsetup netctl dropbear openssh python sudo mkinitcpio-dropbear mkinitcpio-netconf mkinitcpio-nfs-utils mkinitcpio-utils
+      command: pacstrap /mnt base dhclient dhcpcd grub linux linux-firmware lvm2 mdadm cryptsetup netctl dropbear openssh python sudo mkinitcpio-dropbear mkinitcpio-netconf mkinitcpio-nfs-utils mkinitcpio-utils python3
       tags:
         - pacstrap
     - name: Generate fstab
@@ -336,23 +336,24 @@
       tags:
         - hostname
 
-    - name: Setup netctl
+    - name: Setup systemd-networkd
       block:
-        - name: Create netctl profile for wired connection
+        - name: Setup network
           copy:
             content: |
-              Description='Wired with DHCP'
-              Interface={{ wired_interface }}
-              Connection=ethernet
-              IP=dhcp
-              IP6=dhcp-noaddr
-              # IPv6 traffic is tunneled over IPv4, which eats 20 bytes of the MTU.
-              ExecUpPost='/usr/bin/ip link set {{ wired_interface }} mtu 1480'
-            dest: /mnt/etc/netctl/wired
-        - name: Enable wired netctl profile
-          command: arch-chroot /mnt netctl enable wired
+              [Match]
+              Name={{ wired_interface }}
+
+              [Network]
+              ConfigureWithoutCarrier=true
+              Address=192.168.1.21/24
+              Gateway=192.168.1.254
+              DNS=192.168.1.254
+            dest: /mnt/etc/systemd/network/50-{{ wired_interface }}.network
+        - name: Enable network
+          command: arch_chroot /mnt systemctl enable systemd-networkd
       tags:
-        - netctl
+        - systemd_networkd
 
     - name: Enable sshd
       command: arch-chroot /mnt systemctl enable sshd
